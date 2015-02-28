@@ -110,6 +110,7 @@ public final class OpenAddressHashMap<K, V> implements Map<K, V> {
             throw new NullPointerException("Key cannot be null!");
         }
 
+        //TODO - rewrite it, it's incorrect
         Element<K, V> element = elements[getIndex((K) key)];
         return element != null;
     }
@@ -218,11 +219,9 @@ public final class OpenAddressHashMap<K, V> implements Map<K, V> {
     }
 
     private void insertToFreeCell(K key, V value, int newIndex, Element<K, V> previous) {
-        Element<K,V> tempNext = previous.getNext();
-        Element<K,V> inserted = new Element<>(key, value, tempNext, previous);
-
-        elements[newIndex] = inserted;
-        previous.setNext(inserted);
+        elements[newIndex] = new Element<>(key, value,
+                previous.getNext(), previous); //our new added el
+        previous.setNext(elements[newIndex]);
     }
 
     private void insertAbsentElementToFreeCell(K key, V value, int index) {
@@ -233,10 +232,8 @@ public final class OpenAddressHashMap<K, V> implements Map<K, V> {
             insertToFreeCell(key, value, index, previous);
         }else {
             //the inserted element is first
-            Element<K,V> inserted = new Element<>(key, value, null, null);
-            elements[index] = inserted;
-
-            root = inserted;
+            elements[index] = new Element<>(key, value, null, null);
+            root = elements[index];
         }
 
         size++;
