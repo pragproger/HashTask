@@ -10,117 +10,132 @@ import java.util.*;
  *
  * Null keys are not possible! Null values are possible.
  *
- * @param <K>
- * @param <V>
  */
-public final class OpenAddressHashMap<K, V> implements Map<K, V> {
+public final class OpenAddressHashMap  {
 
-    private static class Element<K, V> {
-        private V value;
-        private final K key;
+    private static class Element {
+        private Long value;
+        private final Integer key;
 
-        private Element<K, V> next;
-        private Element<K, V> prev;
+        private Element next;
+        private Element prev;
 
-        private Element(K key, V value, Element<K, V> next, Element<K, V> prev) {
+        private Element(Integer key, Long value, Element next, Element prev) {
             this.key = key;
             this.value = value;
             this.next = next;
             this.prev = prev;
         }
 
-        private V getValue() {
+        private Long getValue() {
             return value;
         }
 
-        private K getKey() {
+        private Integer getKey() {
             return key;
         }
 
-        private Element<K, V> getNext() {
+        private Element getNext() {
             return next;
         }
 
-        private Element<K, V> getPrev() {
+        private Element getPrev() {
             return prev;
         }
 
-        private void setNext(Element<K, V> next) {
+        private void setNext(Element next) {
             this.next = next;
         }
 
-        private void setValue(V value) {
+        private void setValue(Long value) {
             this.value = value;
         }
 
-        private void setPrev(Element<K, V> prev) {
+        private void setPrev(Element prev) {
             this.prev = prev;
         }
     }
 
-    private final int DEFAULT_SIZE = 100;
+    /**
+     * Stupid Java doesn't allow to just create a tuple.
+     */
+    private static class ElementPlusPosition {
+        final Element element;
+        final int position;
+
+        private ElementPlusPosition(Element element, int position) {
+            this.element = element;
+            this.position = position;
+
+            //contract of our tuple
+            assert((element == null && position == -1) || (element != null && position >= 0));
+        }
+    }
+
+    private final int DEFAULT_SIZE = 10;
     private final int DEFAULT_SIZE_MULTIPLIER = 2;
 
-    private Element<K, V> [] elements;
+    private Element [] elements;
     private int size;
-    private Element<K, V> root;
-    //(size > 0 && root != null) - is a part of invariant, howevevr invariant
-    //is much bigger
+    private Element root;
+
     //assertions will be used to track invariants
 
-    private final int initialSize;
-    private final int sizeMultiplier;
-
     public OpenAddressHashMap() {
-        initialSize = DEFAULT_SIZE;
-        sizeMultiplier = DEFAULT_SIZE_MULTIPLIER;
-
-        elements = new Element [initialSize];
+        elements = new Element [DEFAULT_SIZE];
         checkInvariant();
     }
 
-    public OpenAddressHashMap(int initialSize, int sizeMultiplier) {
-        if(initialSize <= 0) {
-            throw new IllegalArgumentException("Size has to be greater than 0!");
-        }
-        if(sizeMultiplier <= 1) {
-            throw new IllegalArgumentException("Multiplier has to be greater than 1!");
-        }
-
-        this.initialSize = initialSize;
-        this.sizeMultiplier = sizeMultiplier;
-
-        elements = new Element [initialSize];
-        checkInvariant();
-    }
-
-    @Override
+    /**
+     *
+     * @return simply the quantity of entries in map
+     */
     public int size() {
         return size;
     }
 
-    @Override
+    /**
+     *
+     * @return true if map is empty, false in another case
+     */
     public boolean isEmpty() {
         return size == 0;
     }
 
-    @Override
-    public boolean containsKey(Object key) {
-        if(key == null) {
-            throw new NullPointerException("Key cannot be null!");
-        }
-
-        //TODO - rewrite it, it's incorrect
-        Element<K, V> element = elements[getIndex((K) key)];
-        return element != null;
+    /**
+     *
+     * @param key is not null!
+     * @return  true if key is contained as key of map or false in another case
+     */
+    public boolean containsKey(Integer key) {
+        return getElementByKey(key) != null;
     }
 
-    @Override
+    private ElementPlusPosition getElementByKey(Integer key) {
+        for(int index = getIndex(key); index < elements.length &&
+                cursorInCollisionedBuckets(key, index); index++) {
+            if (elements[index].getKey().equals(key)) {
+                return new ElementPlusPosition(elements[index], index);
+            }
+        }
+
+        return null;
+    }
+
+    private boolean cursorInCollisionedBuckets(Integer key, int index) {
+        return elements[index] != null &&
+                getNormalizedHashcode(elements[index].getKey().hashCode())
+                        == getNormalizedHashcode(key.hashCode());
+    }
+
+    /**
+     *
+     * @param value any
+     * @return true if some entry has the specified value
+     */
     public boolean containsValue(Object value) {
         //we should iterate across our internal list
-        Element<K,V> pointer = root;
-
-        for(;pointer != null;pointer = pointer.getNext()) {
+        for(Element pointer = root;pointer != null; pointer = pointer.getNext()) {
             if((pointer.getValue() == null && value == null) ||
                     (value != null && value.equals(pointer.getValue())) ) {
                 return true;
@@ -130,87 +145,56 @@ public final class OpenAddressHashMap<K, V> implements Map<K, V> {
         return false;
     }
 
-    @Override
-    public V get(Object key) {
-        if(key == null) {
-            throw new NullPointerException("key cannot be null!");
-        }
+    /**
+     *
+     * @param key is not null!
+     * @return
+     */
+    public Long get(Integer key) {
+        ElementPlusPosition elementPlusPosition = getElementByKey(key);
 
-        int startIndex = getIndex((K) key);
-        Element<K,V> current = elements[startIndex];
-
-        if(current != null) {
-            if(current.getKey().equals(key)) {
-                return current.getValue();
-            }else {
-                for(int index = startIndex;index < elements.length;index++) {
-                   if(elements[index] != null && elements[index].getKey().equals(key)) {
-                       return elements[index].getValue();
-                   }
-                }
-            }
-        }
-
-        return null;
+        return (elementPlusPosition != null) ? elementPlusPosition.element.getValue() : null;
     }
 
-    @Override
-    public V put(K key, V value) {
-        if(key == null) {
-            throw new NullPointerException("Key cannot be null!");
-        }
+    /**
+     *
+     * @param key cannot be null!
+     * @param value
+     * @return
+     */
+    public Long put(Integer key, Long value) {
+        final Long result = doPut(key, value);
 
-        int index = getIndex(key);
-        if(elements[index] == null) {
-            //simple case - cell is free for new element, we can just insert new element
-            insertAbsentElementToFreeCell(key, value, index);
-            //no existing element before, so return null
-            checkInvariant();
-            return null;
-        }else {
-            //elements exist
-            Element<K,V> existed = elements[index];
+        checkInvariant();
+        return result;
+    }
 
-            if(existed.getKey().equals(key)) {
-                //just change the value
-                V oldValue = existed.getValue();
-                existed.setValue(value);
+    private Long doPut(Integer key, Long value) {
+        Element old = null;
+        final Long result;
 
-                checkInvariant();
-                return oldValue;
-            } else {
-                //we have hash collision - so just use the open addressing to find the free bucket
-                int newIndex = -1;
-                V oldValue = null;
+        int i = getIndex(key);
 
-                //TODO review this cycle
-                for(int k = index;k < elements.length && newIndex < 0;k++) {
-                   if(elements[k] == null) {
-                       newIndex = k;
-                   }else {
-                       if(elements[k].getKey().equals(key)) {
-                           oldValue = elements[k].getValue();
-                       }
-                   }
-                }
-
-                if(newIndex > 0) {
-                    //we have found free cell (or free bucket)
-                    //we know that previous will be not null by the contract of hash map internal
-                    //implementation
-                    insertToFreeCell(key, value, newIndex, elements[newIndex - 1]);
-
-                    size++;
-
-                    checkInvariant();
-                    return oldValue;
-                } else {
-                    //there are no free space
-                    recreate();
-                    return put(key, value);
-                }
+        for(; (i < elements.length) && ((old == null) &&
+            cursorInCollisionedBuckets(key, i)) ;i++) {
+            if(elements[i].getKey().equals(key)) {
+                old = elements[i];
             }
         }
+
+        if (old != null) {
+            result = old.getValue();
+            old.setValue(value);
+        }else if(i < elements.length && elements[i] == null) {
+            //simple case - cell is free for new element, we can just insert new element
+            insertAbsentElementToFreeCell(key, value, i);
+            //no existing element before, so return null
+            result = null;
+        }else {
+            recreate();
+            result = doPut(key, value);
+        }
+        return result;
     }
 
     private void checkInvariant() {
@@ -218,64 +202,62 @@ public final class OpenAddressHashMap<K, V> implements Map<K, V> {
                (size == 0 && root == null)) && (size >= 0));
     }
 
-    private void insertToFreeCell(K key, V value, int newIndex, Element<K, V> previous) {
-        elements[newIndex] = new Element<>(key, value,
-                previous.getNext(), previous); //our new added el
-        previous.setNext(elements[newIndex]);
+    private void insertToFreeCell(Integer key, Long value, int newIndex, Element previous) {
+        //we insert element to both array and internal linked list
+        Element newElement = new Element(key, value,
+                previous.getNext(), previous);
+        elements[newIndex] = newElement; //our new added el
+        previous.setNext(newElement);
     }
 
-    private void insertAbsentElementToFreeCell(K key, V value, int index) {
-        Element<K, V> previous = getPreviousListedElement(index);
+    private void insertAbsentElementToFreeCell(Integer key, Long value, int index) {
+        Element previous = getPreviousListedElement(index);
 
         if(previous != null) {
             //insert new node into linked list
             insertToFreeCell(key, value, index, previous);
         }else {
             //the inserted element is first
-            elements[index] = new Element<>(key, value, null, null);
-            root = elements[index];
+            root = new Element(key, value, null, null);
+            elements[index] = root;
         }
 
         size++;
     }
 
-    private Element<K, V> getPreviousListedElement(int index) {
-        Element<K,V> previous = null;
-
-        for(int k = index;k >= 0 && previous == null;k--){
+    private Element getPreviousListedElement(int index) {
+        for(int k = index; k >= 0; k--){
             if(elements[k] != null) {
-                previous = elements[k];
+                return elements[k];
             }
 
         }
-        return previous;
+        return null;
     }
 
-    private int getIndex(K key) {
-        return key.hashCode() % elements.length;
+    private int getIndex(Integer key) {
+        return getNormalizedHashcode(key) % elements.length;
     }
 
-    @Override
-    public V remove(Object key) {
-        if(key == null) {
-            throw new NullPointerException("Key cannot be null!");
-        }
+    private int getNormalizedHashcode(Integer key) {
+        //we use 2 multiplier here because we need to track the situation
+        //when key -2 is inserted after key 1 and 2 - we prevent infinite recursion
+        return Math.abs(key.hashCode() * 2);
+    }
 
-        Element<K,V> existed = null;
-        int indexFound = -1;
-
+    /**
+     *
+     * @param key is not null!
+     * @return old value if was present or null
+     */
+    public Long remove(Integer key) {
         //we need to find required element
-        for(int index = getIndex((K) key); (index < elements.length) &&
-                (elements[index] != null && elements[index].getKey().hashCode() == key.hashCode())
-                && (existed == null); index++) {
-            if(elements[index].getKey().equals(key)) {
-                existed = elements[index];
-                indexFound = index;
-            }
-        }
+        ElementPlusPosition elementPlusPosition = getElementByKey(key);
+        Element existed = (elementPlusPosition != null) ? elementPlusPosition.element : null;
 
         if(existed != null) {
-            elements[indexFound] = null;
+            //just as the contract of el plus position, indexFound be correct in this case
+            elements[elementPlusPosition.position] = null;
 
             if(existed.getPrev() != null) {
                 existed.getPrev().setNext(existed.getNext());
@@ -286,65 +268,46 @@ public final class OpenAddressHashMap<K, V> implements Map<K, V> {
             }
 
             size--;
-
-            checkInvariant();
-            return existed.getValue();
         }
 
         checkInvariant();
-        return null;
+        return (existed != null) ? existed.getValue() : null;
     }
 
-    @Override
-    public void putAll(Map<? extends K, ? extends V> m) {
-        if(m == null) {
-            throw new NullPointerException("Map m cannot be null!");
-        }
-
-        for(Map.Entry<? extends K, ? extends V> entry : m.entrySet()) {
-            this.put(entry.getKey(), entry.getValue());
+    /**
+     *
+     * @param m strictly not null!
+     */
+    public void putAll(Map<? extends Integer, ? extends Long> m) {
+        for(Map.Entry<? extends Integer, ? extends Long> entry : m.entrySet()) {
+            this.doPut(entry.getKey(), entry.getValue());
         }
 
         checkInvariant();
     }
 
     private void recreate() {
-        int futureSize = elements.length * sizeMultiplier;
+        int futureSize = elements.length * DEFAULT_SIZE_MULTIPLIER;
         elements = new Element[futureSize];
         size = 0;
 
-        Element<K,V> current = root;
+        Element current = root;
         root = null;
 
         for(;current != null; current = current.getNext()){
-            put(current.getKey(), current.getValue());
+            doPut(current.getKey(), current.getValue());
         }
-
-        checkInvariant();
     }
 
-    @Override
+
+    /**
+     * Removes all entries from map.
+     */
     public void clear() {
         size = 0;
         elements = new Element[elements.length];
         root = null;
 
         checkInvariant();
-    }
-
-    @Override
-    public Set<K> keySet() {
-        return null;  //To change body of implemented methods use File | Settings | File Templates.
-    }
-
-    @Override
-    public Collection<V> values() {
-
-        return null;
-    }
-
-    @Override
-    public Set<Entry<K, V>> entrySet() {
-        return null;  //To change body of implemented methods use File | Settings | File Templates.
     }
 }
