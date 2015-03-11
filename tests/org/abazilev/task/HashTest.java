@@ -70,16 +70,16 @@ public class HashTest {
     }
 
     @Test
-    public void testWithRecreate() {
+    public void testBigQuantity() {
         //prepare test data and make a test
-        for(int i = 0;i < 50;i++) {
+        for(int i = 0;i < 70;i++) {
             map.put(i, i*10l);
         }
         //check results
-        assertThat(map.size(), is(50));
+        assertThat(map.size(), is(70));
         assertTrue(map.containsKey(20));
         assertTrue(map.containsKey(21));
-        assertFalse(map.containsKey(60));
+        assertFalse(map.containsKey(80));
         assertTrue(map.containsValue(200l));
         assertTrue(map.containsValue(210l));
     }

@@ -8,81 +8,43 @@ import java.util.*;
  *
  * Class is not thread safe!!!!!
  *
- * Null keys are not possible! Null values are possible.
+ * Null keys are not possible! Null values are possible. 0 means free cell.
  *
  */
 public final class OpenAddressHashMap  {
 
-    private static class Element {
-        private Long value;
-        private final Integer key;
+    private final int DEFAULT_SIZE = 127;
+    private final int SECOND_HASH_NUMBER = 7;
 
-        private Element next;
-        private Element prev;
+    private static class Entry {
+        private final int key;
+        private long value;
 
-        private Element(Integer key, Long value, Element next, Element prev) {
-            this.key = key;
+        private Entry(int key, long value) {
             this.value = value;
-            this.next = next;
-            this.prev = prev;
+            this.key = key;
         }
 
-        private Long getValue() {
-            return value;
-        }
-
-        private Integer getKey() {
+        private int getKey() {
             return key;
         }
 
-        private Element getNext() {
-            return next;
+        private long getValue() {
+            return value;
         }
 
-        private Element getPrev() {
-            return prev;
-        }
-
-        private void setNext(Element next) {
-            this.next = next;
-        }
-
-        private void setValue(Long value) {
+        private void setValue(long value) {
             this.value = value;
         }
-
-        private void setPrev(Element prev) {
-            this.prev = prev;
-        }
     }
 
-    /**
-     * Stupid Java doesn't allow to just create a tuple.
-     */
-    private static class ElementPlusPosition {
-        final Element element;
-        final int position;
-
-        private ElementPlusPosition(Element element, int position) {
-            this.element = element;
-            this.position = position;
-
-            //contract of our tuple
-            assert((element == null && position == -1) || (element != null && position >= 0));
-        }
-    }
-
-    private final int DEFAULT_SIZE = 10;
-    private final int DEFAULT_SIZE_MULTIPLIER = 2;
-
-    private Element [] elements;
+    private Entry [] elements;
     private int size;
-    private Element root;
 
     //assertions will be used to track invariants
 
     public OpenAddressHashMap() {
-        elements = new Element [DEFAULT_SIZE];
+        elements = new Entry [DEFAULT_SIZE];
         checkInvariant();
     }
 
@@ -102,30 +64,14 @@ public final class OpenAddressHashMap  {
         return size == 0;
     }
 
-    /**
-     *
-     * @param key is not null!
-     * @return  true if key is contained as key of map or false in another case
-     */
-    public boolean containsKey(Integer key) {
+    public boolean containsKey(int key) {
         return getElementByKey(key) != null;
     }
 
-    private ElementPlusPosition getElementByKey(Integer key) {
-        for(int index = getIndex(key); index < elements.length &&
-                cursorInCollisionedBuckets(key, index); index++) {
-            if (elements[index].getKey().equals(key)) {
-                return new ElementPlusPosition(elements[index], index);
-            }
-        }
+    private Entry getElementByKey(int key) {
+        int index = getFreeOrSameKeyPosition(key);
 
-        return null;
-    }
-
-    private boolean cursorInCollisionedBuckets(Integer key, int index) {
-        return elements[index] != null &&
-                getNormalizedHashcode(elements[index].getKey().hashCode())
-                        == getNormalizedHashcode(key.hashCode());
+        return (index != -1) ? elements[index] : null;
     }
 
     /**
@@ -133,13 +79,12 @@ public final class OpenAddressHashMap  {
      * @param value any
      * @return true if some entry has the specified value
      */
-    public boolean containsValue(Object value) {
+    public boolean containsValue(long value) {
         //we should iterate across our internal list
-        for(Element pointer = root;pointer != null; pointer = pointer.getNext()) {
-            if((pointer.getValue() == null && value == null) ||
-                    (value != null && value.equals(pointer.getValue())) ) {
-                return true;
-            }
+        for(int i = 0;i < elements.length;i++) {
+           if(elements[i] != null && elements[i].getValue() == value) {
+               return true;
+           }
         }
 
         return false;
@@ -150,128 +95,101 @@ public final class OpenAddressHashMap  {
      * @param key is not null!
      * @return
      */
-    public Long get(Integer key) {
-        ElementPlusPosition elementPlusPosition = getElementByKey(key);
+    public long get(Integer key) {
+        Entry entry = getElementByKey(key);
 
-        return (elementPlusPosition != null) ? elementPlusPosition.element.getValue() : null;
+        return entry != null ? entry.getValue() : 0;
     }
 
     /**
      *
-     * @param key cannot be null!
-     * @param value
+     * @param key
+     * @param value can be 0 but in this case you will not be able to check the
+     *              presence of value in hash table
      * @return
      */
-    public Long put(Integer key, Long value) {
+    public long put(Integer key, Long value) {
         final Long result = doPut(key, value);
 
         checkInvariant();
         return result;
     }
 
-    private Long doPut(Integer key, Long value) {
-        Element old = null;
-        final Long result;
+    /**
+     * This function checks the array to find the cell with specified key or first null (free)
+     * cell. It returns -1 if no free cells or cell with specified key was found,
+     * or index of cell in another case.
+     *
+     * @param key the key to find in array
+     * @return  -1 or index
+     */
+    private int getFreeOrSameKeyPosition(int key) {
+        int indexHashCode = Math.abs(key);
 
-        int i = getIndex(key);
+        for(int i = 0;i < elements.length;i++) {
+            //use double hashing to prevent clustering
+            int hashIndex = (indexHashCode + i*(SECOND_HASH_NUMBER -
+                    (indexHashCode % SECOND_HASH_NUMBER)))
+                    % elements.length;
 
-        for(; (i < elements.length) && ((old == null) &&
-            cursorInCollisionedBuckets(key, i)) ;i++) {
-            if(elements[i].getKey().equals(key)) {
-                old = elements[i];
+            if(elements[hashIndex] == null || elements[hashIndex].getKey() == key) {
+                return hashIndex;
             }
         }
 
-        if (old != null) {
-            result = old.getValue();
-            old.setValue(value);
-        }else if(i < elements.length && elements[i] == null) {
-            //simple case - cell is free for new element, we can just insert new element
-            insertAbsentElementToFreeCell(key, value, i);
-            //no existing element before, so return null
-            result = null;
-        }else {
-            recreate();
-            result = doPut(key, value);
-        }
-        return result;
+        return -1;
     }
 
-    private void checkInvariant() {
-       assert ((elements != null) && ((size > 0 && root != null) ||
-               (size == 0 && root == null)) && (size >= 0));
-    }
+    private long doPut(int key, long value) {
+        int index = getFreeOrSameKeyPosition(key);
 
-    private void insertToFreeCell(Integer key, Long value, int newIndex, Element previous) {
-        //we insert element to both array and internal linked list
-        Element newElement = new Element(key, value,
-                previous.getNext(), previous);
-        elements[newIndex] = newElement; //our new added el
-        previous.setNext(newElement);
-    }
-
-    private void insertAbsentElementToFreeCell(Integer key, Long value, int index) {
-        Element previous = getPreviousListedElement(index);
-
-        if(previous != null) {
-            //insert new node into linked list
-            insertToFreeCell(key, value, index, previous);
-        }else {
-            //the inserted element is first
-            root = new Element(key, value, null, null);
-            elements[index] = root;
+        if(index == -1) {
+            //no free space
+            throw new IllegalStateException("No free space!");
         }
 
-        size++;
-    }
-
-    private Element getPreviousListedElement(int index) {
-        for(int k = index; k >= 0; k--){
-            if(elements[k] != null) {
-                return elements[k];
-            }
-
+        if(elements[index] == null) {
+            //simple free cell - add new element
+            elements[index] = new Entry(key, value);
+            size++;
+            return 0;
+        } else {
+            long oldValue = elements[index].getValue();
+            elements[index].setValue(value);
+            return oldValue;
         }
-        return null;
-    }
-
-    private int getIndex(Integer key) {
-        return getNormalizedHashcode(key) % elements.length;
-    }
-
-    private int getNormalizedHashcode(Integer key) {
-        //we use 2 multiplier here because we need to track the situation
-        //when key -2 is inserted after key 1 and 2 - we prevent infinite recursion
-        return Math.abs(key.hashCode() * 2);
     }
 
     /**
+     * We use design by contract - at least sometimes.
+     */
+    private void checkInvariant() {
+       assert (elements != null  && size >= 0);
+    }
+
+    /**
+     * Removes the element with specified keys from table.
      *
-     * @param key is not null!
+     * @param key
      * @return old value if was present or null
      */
-    public Long remove(Integer key) {
+    public long remove(int key) {
         //we need to find required element
-        ElementPlusPosition elementPlusPosition = getElementByKey(key);
-        Element existed = (elementPlusPosition != null) ? elementPlusPosition.element : null;
+        int index = getFreeOrSameKeyPosition(key);
 
-        if(existed != null) {
-            //just as the contract of el plus position, indexFound be correct in this case
-            elements[elementPlusPosition.position] = null;
-
-            if(existed.getPrev() != null) {
-                existed.getPrev().setNext(existed.getNext());
+        final long oldValue;
+        if(index == -1) {
+            oldValue = 0;
+        }else {
+            oldValue = (elements[index] != null) ? elements[index].getValue() : 0;
+            if(elements[index] != null) {
+                size--;
             }
-
-            if(existed.getNext() != null) {
-                existed.getNext().setPrev(existed.getPrev());
-            }
-
-            size--;
+            elements[index] = null;
         }
 
         checkInvariant();
-        return (existed != null) ? existed.getValue() : null;
+        return oldValue;
     }
 
     /**
@@ -286,27 +204,13 @@ public final class OpenAddressHashMap  {
         checkInvariant();
     }
 
-    private void recreate() {
-        int futureSize = elements.length * DEFAULT_SIZE_MULTIPLIER;
-        elements = new Element[futureSize];
-        size = 0;
-
-        Element current = root;
-        root = null;
-
-        for(;current != null; current = current.getNext()){
-            doPut(current.getKey(), current.getValue());
-        }
-    }
-
 
     /**
      * Removes all entries from map.
      */
     public void clear() {
         size = 0;
-        elements = new Element[elements.length];
-        root = null;
+        elements = new Entry[DEFAULT_SIZE];
 
         checkInvariant();
     }
